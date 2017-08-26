@@ -1,27 +1,38 @@
+//librairies utiles
+#include <Wire.h>
 #include <Event.h>
 #include <Timer.h>
-#include <Wire.h>  
 #include <LiquidCrystal_I2C.h> // Using version 1.2.1
 #include "EEPROM.h"
 #include "SevSeg.h"
 
+//valeurs utiles
+//pour l'afficheur 7 segments
 #define PROMO 16
 #define FILLIERE 1
+//pour l'affichage des stats
 #define HIGHSCORE 2
 #define TODAY 3
 #define MOYENNE 4
+#define RANDOMSHIT 5
 
-//Create an instance of the object.
+//afficheur 7 segments 4 chiffres
 SevSeg myDisplay;
 
+//afficheur LCD
 LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE); 
+//sda A4 et SCL A5
 
 
+//adresses eeprom pour stocker highscore reboots et total
 const int counter_addr = 0;
 const int highscore_addr = 2;
 const int reboots_addr = 4;
+
+//adresse du bouton
 const int button = A0;
 
+//statistiques à afficher
 int counter_total ;
 int counter_reboots ;
 int counter_today ;
@@ -33,12 +44,17 @@ Timer t ;
 int digit_state = PROMO ;
 int lcd_state = TODAY ;
 
+String random_shit[10] = {"coucou","bordel","sacrebleu","lol","auvergne independante","pouet"};
+
 char tempString[5] = {'I','N','F','o'}; //Used for sprintf
 
 void setup()
 {
-  pinMode(button, INPUT);
+  //reinit();
 
+  
+  pinMode(button, INPUT);
+  
   int reboots = lireInt(reboots_addr);
   reboots ++ ;
   sauverInt(reboots_addr,reboots);
@@ -46,32 +62,10 @@ void setup()
   counter_today=0;
 
   counter_total = lireInt(counter_addr);
-  sauverInt(counter_addr,counter_total);
+  //sauverInt(counter_addr,counter_total);
 
-
-  //init lcd
-  lcd.begin(16,2); // sixteen characters across - 2 lines
-  lcd.backlight();
-
-  // write lcd
-  indent  =15 ;
-  if(counter_total > 9) indent =14 ;
-  if(counter_total > 99) indent =13 ;
-  if(counter_total > 999) indent =12 ;
-  lcd.setCursor(0,0);
-  lcd.print("Total bieres: ");
-  lcd.setCursor(indent,0);
-  lcd.print(counter_total);
-  lcd.setCursor(0,1);
-
-  indent  =15 ;
-  if(counter_today > 9) indent =14 ;
-  if(counter_today > 99) indent =13 ;
-  if(counter_today > 999) indent =12 ;
-  lcd.print("Aujourd'hui:");
-  lcd.setCursor(indent,1);
-  lcd.print(counter_today);
-  
+  init_lcd();
+ 
   t.every(10, update_digits);
   t.every(5000, switch_digits);
   t.every(5000, switch_screen);
@@ -85,8 +79,16 @@ void loop()
 {
   t.update();
   if(digitalRead(button)==HIGH){
-      
-    counter_total = lireInt(counter_addr);
+      drink_beer();
+  }
+  
+
+}
+
+//indente le score et change l'affichage
+void drink_beer()
+{
+      counter_total = lireInt(counter_addr);
     counter_highscore = lireInt(highscore_addr);
 
     counter_total ++ ;
@@ -129,47 +131,17 @@ void loop()
       lcd.print(counter_today);
     }
     while(digitalRead(button)==HIGH) ;
-  }
-  
-
-}
-
-void sauverInt(int adresse, int val) 
-{   
-    //découpage de la variable val qui contient la valeur à sauvegarder en mémoire
-    unsigned char faible = val & 0x00FF; //récupère les 8 bits de droite (poids faible) -> 0010 1100 
-    //calcul : 1101 0111 0010 1100 & 0000 0000 1111 1111 = 0010 1100
-
-    unsigned char fort = (val >> 8) & 0x00FF;  //décale puis récupère les 8 bits de gauche (poids fort) -> 1101 0111
-    //calcul : 1101 0111 0010 1100 >> 8 = 0000 0000 1101 0111 puis le même & qu’avant
-
-    //puis on enregistre les deux variables obtenues en mémoire
-    EEPROM.write(adresse, fort) ; //on écrit les bits de poids fort en premier
-    EEPROM.write(adresse+1, faible) ; //puis on écrit les bits de poids faible à la case suivante
-}
-
-int lireInt(int adresse)
-{
-    int val = 0 ; //variable de type int, vide, qui va contenir le résultat de la lecture
-
-    unsigned char fort = EEPROM.read(adresse);     //récupère les 8 bits de gauche (poids fort) -> 1101 0111
-    unsigned char faible = EEPROM.read(adresse+1); //récupère les 8 bits de droite (poids faible) -> 0010 1100
-
-    //assemblage des deux variable précédentes
-    val = fort ;         // val vaut alors 0000 0000 1101 0111
-    val = val << 8 ;     // val vaut maintenant 1101 0111 0000 0000 (décalage)
-    val = val | faible ; // utilisation du masque
-    // calcul : 1101 0111 0000 0000 | 0010 1100 = 1101 0111 0010 1100
-
-    return val ; //on n’oublie pas de retourner la valeur lue !
 }
 
 
+//fonction qui fait briller les chiffres, visiblement faut la garder tout le temps...
 void update_digits()
 {
     myDisplay.DisplayString(tempString, 0); //(numberToDisplay, decimal point location)
 }
 
+
+//marche pas bien
 void switch_screen()
 {
   counter_total = lireInt(counter_addr);
@@ -231,6 +203,8 @@ void switch_screen()
   }
 
 }
+
+//pour switcher entre "info" et "16"
 void switch_digits()
 {
   if(digit_state == PROMO ){
@@ -248,6 +222,37 @@ void switch_digits()
   } 
 }
 
+void init_lcd()
+{
+   //init lcd
+  lcd.begin(16,2); // sixteen characters across - 2 lines
+  lcd.backlight();
+
+  // write lcd
+  indent  =15 ;
+  if(counter_total > 9) indent =14 ;
+  if(counter_total > 99) indent =13 ;
+  if(counter_total > 999) indent =12 ;
+  lcd.setCursor(0,0);
+  lcd.print("Total bieres: ");
+  lcd.setCursor(indent,0);
+  lcd.print(counter_total);
+  lcd.setCursor(0,1);
+
+  indent  =15 ;
+  if(counter_today > 9) indent =14 ;
+  if(counter_today > 99) indent =13 ;
+  if(counter_today > 999) indent =12 ;
+  lcd.print("Aujourd'hui:");
+  lcd.setCursor(indent,1);
+  lcd.print(counter_today);
+
+  lcd.setCursor(0,0);
+  lcd.print(random_shit[2]);
+  
+}
+
+//Pour initialiser l'afficheur 7 segments 4 digits
 void init_digits()
 {
 
@@ -256,7 +261,7 @@ void init_digits()
   
   //This pinout is for a bubble dispaly
   //Declare what pins are connected to the GND pins (cathodes)
-  int digit1 = 2; //Pin 1
+  int digit1 = 2; //Pin 1 -> ceux ci sont reliés à l'arduino avec des résistances de 330 ohm
   int digit2 = 3; //Pin 10
   int digit3 = 4; //Pin 4
   int digit4 = 5; //Pin 6
@@ -276,4 +281,42 @@ void init_digits()
   myDisplay.Begin(displayType, numberOfDigits, digit1, digit2, digit3, digit4, segA, segB, segC, segD, segE, segF, segG, segDP);
   
   myDisplay.SetBrightness(100); //Set the display to 100% brightness level
+}
+
+
+void reinit()
+{
+  sauverInt(highscore_addr,0);
+  sauverInt(counter_addr,0);
+  sauverInt(reboots_addr,0);
+}
+
+void sauverInt(int adresse, int val) 
+{   
+    //découpage de la variable val qui contient la valeur à sauvegarder en mémoire
+    unsigned char faible = val & 0x00FF; //récupère les 8 bits de droite (poids faible) -> 0010 1100 
+    //calcul : 1101 0111 0010 1100 & 0000 0000 1111 1111 = 0010 1100
+
+    unsigned char fort = (val >> 8) & 0x00FF;  //décale puis récupère les 8 bits de gauche (poids fort) -> 1101 0111
+    //calcul : 1101 0111 0010 1100 >> 8 = 0000 0000 1101 0111 puis le même & qu’avant
+
+    //puis on enregistre les deux variables obtenues en mémoire
+    EEPROM.write(adresse, fort) ; //on écrit les bits de poids fort en premier
+    EEPROM.write(adresse+1, faible) ; //puis on écrit les bits de poids faible à la case suivante
+}
+
+int lireInt(int adresse)
+{
+    int val = 0 ; //variable de type int, vide, qui va contenir le résultat de la lecture
+
+    unsigned char fort = EEPROM.read(adresse);     //récupère les 8 bits de gauche (poids fort) -> 1101 0111
+    unsigned char faible = EEPROM.read(adresse+1); //récupère les 8 bits de droite (poids faible) -> 0010 1100
+
+    //assemblage des deux variable précédentes
+    val = fort ;         // val vaut alors 0000 0000 1101 0111
+    val = val << 8 ;     // val vaut maintenant 1101 0111 0000 0000 (décalage)
+    val = val | faible ; // utilisation du masque
+    // calcul : 1101 0111 0000 0000 | 0010 1100 = 1101 0111 0010 1100
+
+    return val ; //on n’oublie pas de retourner la valeur lue !
 }
