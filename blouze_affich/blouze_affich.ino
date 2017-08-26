@@ -1,27 +1,69 @@
-//librairies utiles
+/*********************************************************************************
+*     File Name           :     blouz_affich.ino
+*     Created By          :     Roger
+*     Creation Date       :     [2017-04-03 14:30]
+*     Last Modified       :     [AUTO_UPDATE_BEFORE_SAVE]
+*     Description         :     Mini projet d'embarqué consistant à intégrer deux afficheurs 
+*                               et un bouton sur un blouse UTBM afin de reccueillir
+*                               des statistiques alcooliques et les afficher en temps réel.
+*                               Développé en écoutant du Megadeth.
+**********************************************************************************/
+
+
+
+
+
+////////////////////////////////////////////
+//                                        //
+//            Librairies Utiles           //
+//                                        //
+////////////////////////////////////////////
+
 #include <Wire.h>
 #include <Event.h>
 #include <Timer.h>
-#include <LiquidCrystal_I2C.h> // Using version 1.2.1
+#include <LiquidCrystal_I2C.h> // Using version 1.2.1 <- /!\ testé avec les nouvelles version, ça veut pas compiler 
 #include "EEPROM.h"
 #include "SevSeg.h"
 
-//valeurs utiles
+
+
+
+////////////////////////////////////////////
+//                                        //
+//  Declaration variables & Constantes    //
+//                                        //
+////////////////////////////////////////////
+
+//Etats d'ébriété
+#define SOBER 0
+#define TIPSY 2
+#define DRUNK 4
+#define PISSED 6
+#define BLACK_OUT 9
+
+
 //pour l'afficheur 7 segments
 #define PROMO 16
+#define BEER 0
 #define FILLIERE 1
+
 //pour l'affichage des stats
-#define HIGHSCORE 2
-#define TODAY 3
-#define MOYENNE 4
-#define RANDOMSHIT 5
+#define HIGHSCORE 0
+#define TODAY 1
+#define MOYENNE 2
+#define RANDOMSHIT 3
+#define EBRIETE 4
+
+//pour l'affichage des conneries
+#define NB_RANDOMSHIT 10
 
 //afficheur 7 segments 4 chiffres
 SevSeg myDisplay;
 
 //afficheur LCD
-LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE); 
-//sda A4 et SCL A5
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE); // Branchement : sda A4 et SCL A5
+
 
 
 //adresses eeprom pour stocker highscore reboots et total
@@ -39,41 +81,80 @@ int counter_today ;
 int counter_highscore ;
 int indent = 15 ;
 
+//un timer pour gérer differents types d'events
 Timer t ;
 
+//les etats des afficheurs
 int digit_state = PROMO ;
 int lcd_state = TODAY ;
 
-String random_shit[10] = {"coucou","bordel","sacrebleu","lol","auvergne independante","pouet"};
+//état de buvage
+int still_drinking = 0 ;
 
-char tempString[5] = {'I','N','F','o'}; //Used for sprintf
+
+//un "dictionnaire" a phrases bidons pour le lcd
+String random_shit_line1[NB_RANDOMSHIT] = 
+                          {" C'est pas faux ",//0
+                          "     Sire,      ", //1
+                          "    Le GRAS     ", //2
+                          "      FREE      ", //3
+                          "  Pipi statue ? ", //4
+                          "  Celui qui lit ", //5
+                          "  C'est pas moi ", //6
+                          " T vaginalement ", //7
+                          " 06 73 40 76 71 ", //8
+                          "  6xKWAK sur le "  //9
+                          };
+                         
+String random_shit_line2[NB_RANDOMSHIT] = 
+                          {
+                          "                ", //0
+                          " on en a gros ! ", //1
+                          "  c'est la vie  ", //2
+                          "      HUGS      ", //3
+                          "                ", //5
+                          "Ceci est un con ", //7
+                          "c'est la biere !", //8
+                          "motocultable twa", //9
+                          "   Appelle moi  ", //10
+                          "    8291r stp   "  //11
+                          };
+
+//le conteneur de l'afficheur 7 segments
+char tempString[5] = {'I','N','F','o'}; //initialisé à "info"
+
+
+
+////////////////////////////////////////////
+//                                        //
+//            Logique Arduino             //
+//                                        //
+////////////////////////////////////////////
 
 void setup()
 {
   //reinit();
-
-  
   pinMode(button, INPUT);
-  
+
+  //incrémenter le nombre de reboots pour le calcul de la moyenne/jour
   int reboots = lireInt(reboots_addr);
   reboots ++ ;
   sauverInt(reboots_addr,reboots);
 
   counter_today=0;
 
+  counter_highscore = lireInt(highscore_addr);
   counter_total = lireInt(counter_addr);
-  //sauverInt(counter_addr,counter_total);
 
   init_lcd();
- 
-  t.every(10, update_digits);
-  t.every(5000, switch_digits);
-  t.every(5000, switch_screen);
-  
   init_digits();
-
-
+  test_shit();
+  //lancer les events 
+  t.every(10, update_digits);
+  t.every(5 * 1000, switch_digits);
+  t.every(5 * 1000, switch_screen);
 }
+
 
 void loop()
 {
@@ -81,128 +162,315 @@ void loop()
   if(digitalRead(button)==HIGH){
       drink_beer();
   }
-  
-
+  while(digitalRead(button)==HIGH) ;
 }
 
-//indente le score et change l'affichage
-void drink_beer()
+
+////////////////////////////////////////////
+//                                        //
+//      Fonctions affichage LCD           //
+//                                        //
+////////////////////////////////////////////
+void test_shit()
 {
-      counter_total = lireInt(counter_addr);
-    counter_highscore = lireInt(highscore_addr);
-
-    counter_total ++ ;
-    sauverInt(counter_addr,counter_total);
-    counter_today ++ ;
-
-    lcd.setCursor(0,0);
-    lcd.print("Total bieres:   ");
-
-    indent  =15 ;
-    if(counter_total > 9) indent =14 ;
-    if(counter_total > 99) indent =13 ;
-    if(counter_total > 999) indent =12 ;
-    lcd.setCursor(indent,0);
-    lcd.print(counter_total);
-
-    if(counter_today>counter_highscore)
+  for(int i =0 ; i < 10 ; i ++) 
+  {
+     lcd.setCursor(0,0);
+    lcd.print(random_shit_line1[i]);
+    
+    lcd.setCursor(0,1);
+    lcd.print(random_shit_line2[i]);
+    delay(1000);
+  }
+  for(int i =0 ; i < 16 ; i ++) 
+  {
+    switch(i)
     {
-      counter_highscore ++;
-      sauverInt(highscore_addr,counter_highscore);
-
-      indent  =15 ;
-      if(counter_highscore > 9) indent =14 ;
-      if(counter_highscore > 99) indent =13 ;
-      if(counter_highscore > 999) indent =12 ;
-      lcd.setCursor(0,1);
-      lcd.print("Highscore:      ");
-      lcd.setCursor(indent,1);
-      lcd.print(counter_highscore);
+      case SOBER ... TIPSY-1 :
+        lcd.setCursor(0,0);
+        lcd.print("Roger est sobre!");
+        lcd.setCursor(0,1);
+        lcd.print("Une biere, vite!");
+        break;
+      case TIPSY ... DRUNK-1 :
+        lcd.setCursor(0,0);
+        lcd.print("Roger pompette!");
+        lcd.setCursor(0,1);
+        lcd.print("Il a tjrs soif!");
+        break;
+      case DRUNK ... PISSED-1 :
+        lcd.setCursor(0,0);
+        lcd.print("HOURRA ! Roger");
+        lcd.setCursor(0,1);
+        lcd.print("  est bourre  ");
+        break;
+      case PISSED ... BLACK_OUT-1 :
+        lcd.setCursor(0,0);
+        lcd.print(" Merde, Roger ");
+        lcd.setCursor(0,1);
+        lcd.print("  est dechire ");
+        break;
+      case BLACK_OUT ... 999 :
+        lcd.setCursor(0,0);
+        lcd.print("éùBLACK OUT µ ");
+        lcd.setCursor(0,1);
+        lcd.print("é:%*://èè,zs#");
+        break;
+      default :
+        lcd.setCursor(0,0);
+        lcd.print("éùBLACK OUT µ ");
+        lcd.setCursor(0,1);
+        lcd.print("é:%*://èè,zs#"); 
+        break;
+        
     }
-    else{
-
-      indent  =15 ;
-      if(counter_today > 9) indent =14 ;
-      if(counter_today > 99) indent =13 ;
-      if(counter_today > 999) indent =12 ;
-      lcd.setCursor(0,1);
-      lcd.print("Aujourd'hui:    ");
-      lcd.setCursor(indent,1);
-      lcd.print(counter_today);
-    }
-    while(digitalRead(button)==HIGH) ;
+    delay(500);
+  }
 }
 
-
-//fonction qui fait briller les chiffres, visiblement faut la garder tout le temps...
-void update_digits()
+void init_lcd()
 {
-    myDisplay.DisplayString(tempString, 0); //(numberToDisplay, decimal point location)
+   //init lcd
+  lcd.begin(16,2); // sixteen characters across - 2 lines
+  lcd.backlight();
+  // write lcd
+  lcd.setCursor(0,0);
+  lcd.print("Initialisation ");
+  
+  lcd.setCursor(0,1);
+  lcd.print("Please wait    ");
 }
 
-
-//marche pas bien
-void switch_screen()
+void lcd_affiche_highscore()
 {
-  counter_total = lireInt(counter_addr);
-  counter_highscore = lireInt(highscore_addr);
-  float moyenne = (counter_total/lireInt(reboots_addr));
+  lcd.setCursor(0,0);
+  lcd.print("Bieres bues     ");
+    
+  indent  =15 ;
+  if(counter_highscore > 9) indent =14 ;
+  if(counter_highscore > 99) indent =13 ;
+  if(counter_highscore > 999) indent =12 ;
+  lcd.setCursor(0,1);
+  lcd.print("Highscore:      ");
+  lcd.setCursor(indent,1);
+  lcd.print(counter_highscore);
+}
+
+void lcd_affiche_new_highscore()
+{
+  lcd.setCursor(0,0);
+  lcd.print("NEW HIGHSCORE ! ");
+    
+  indent  =15 ;
+  if(counter_highscore > 9) indent =14 ;
+  if(counter_highscore > 99) indent =13 ;
+  if(counter_highscore > 999) indent =12 ;
+  lcd.setCursor(0,1);
+  lcd.print("Highscore:      ");
+  lcd.setCursor(indent,1);
+  lcd.print(counter_highscore);
+}
+
+void lcd_affiche_moyenne()
+{  
+  float moyenne = ((float)counter_total/(float)lireInt(reboots_addr));
+  
+  lcd.setCursor(0,0);
+  lcd.print("Bieres bues     ");
+  lcd.setCursor(0,1);
+  lcd.print("Moyenne/j:      ");
+  lcd.setCursor(12,1);
+  lcd.print(moyenne);
+  
+}
+
+void lcd_affiche_session()
+{
+  
+  lcd.setCursor(0,0);
+  lcd.print("Bieres bues     ");
+  
+  lcd.setCursor(0,1);
+  lcd.print("Aujourd'hui:    ");
+
+  indent  =15 ;
+  if(counter_today > 9) indent =14 ;
+  if(counter_today > 99) indent =13 ;
+  if(counter_today > 999) indent =12 ;
+  lcd.setCursor(indent,1);
+  lcd.print(counter_today);
+}
+
+void lcd_affiche_total()
+{  
+  lcd.setCursor(0,0);
+  lcd.print("Bieres bues     ");
+  
+  lcd.setCursor(0,1);
+  lcd.print("Total :         ");
 
   indent  =15 ;
   if(counter_total > 9) indent =14 ;
   if(counter_total > 99) indent =13 ;
   if(counter_total > 999) indent =12 ;
-  // write lcd
-  lcd.setCursor(0,0);
-  lcd.print("Total bieres:   ");
   lcd.setCursor(indent,0);
-  lcd.print(counter_total);
-  if(lcd_state == TODAY)
-  {
-
-    lcd.setCursor(0,1);
-    lcd.print("Aujourd'hui:    ");
-
-    indent  =15 ;
-    if(counter_today > 9) indent =14 ;
-    if(counter_today > 99) indent =13 ;
-    if(counter_today > 999) indent =12 ;
-    lcd.setCursor(indent,1);
-    lcd.print(counter_today);
-    lcd_state = HIGHSCORE ;
-  }
-  if(lcd_state == HIGHSCORE)
-  {
-    lcd.setCursor(0,1);
-    lcd.print("Highscore:      ");
-
-    indent  =15 ;
-    if(counter_highscore > 9) indent =14 ;
-    if(counter_highscore > 99) indent =13 ;
-    if(counter_highscore > 999) indent =12 ;
-    lcd.setCursor(indent,1);
-    lcd.print(counter_highscore);
-
-    lcd_state = MOYENNE ;
-
-  }
-  if(lcd_state == MOYENNE)
-  {
-    lcd.setCursor(0,1);
-    lcd.print("Moyenne/j:      ");
-
-    indent  =15 ;
-    if(moyenne > 9) indent =14 ;
-    if(moyenne > 99) indent =13 ;
-    if(moyenne > 999) indent =12 ;
-    lcd.setCursor(indent,1);
-    lcd.print(moyenne);
-
-    lcd_state = TODAY ;
-
-  }
-
+  lcd.print(counter_total);  
 }
+
+void lcd_affiche_still_drinking()
+{  
+  lcd.setCursor(0,0);
+  lcd.print("  Finis d'abord ");
+  
+  lcd.setCursor(0,1);
+  lcd.print("celle que t'as !");
+  t.after(3 * 1000 ,switch_screen);
+}
+
+
+void lcd_affiche_ebriete()
+{  
+  switch(counter_today)
+  {
+    case SOBER ... TIPSY-1 :
+      lcd.setCursor(0,0);
+      lcd.print("Roger est sobre!");
+      lcd.setCursor(0,1);
+      lcd.print("Une biere, vite!");
+      break;
+    case TIPSY ... DRUNK-1 :
+      lcd.setCursor(0,0);
+      lcd.print("Roger pompette!");
+      lcd.setCursor(0,1);
+      lcd.print("Il a tjrs soif!");
+      break;
+    case DRUNK ... PISSED-1 :
+      lcd.setCursor(0,0);
+      lcd.print("HOURRA ! Roger");
+      lcd.setCursor(0,1);
+      lcd.print("  est bourre  ");
+      break;
+    case PISSED ... BLACK_OUT-1 :
+      lcd.setCursor(0,0);
+      lcd.print(" Merde, Roger ");
+      lcd.setCursor(0,1);
+      lcd.print("  est déchire ");
+      break;
+    case BLACK_OUT ... 999 :
+      lcd.setCursor(0,0);
+      lcd.print("éùBLACK OUT µ ");
+      lcd.setCursor(0,1);
+      lcd.print("é:%*://èè,zs#");
+      break;
+    default :
+      lcd.setCursor(0,0);
+      lcd.print("éùBLACK OUT µ ");
+      lcd.setCursor(0,1);
+      lcd.print("é:%*://èè,zs#"); 
+      break;
+      
+  }
+}
+
+void lcd_affiche_randomshit()
+{
+  int randomshit = random(NB_RANDOMSHIT);
+  lcd.setCursor(0,0);
+  lcd.print(random_shit_line1[randomshit]);
+  
+  lcd.setCursor(0,1);
+  lcd.print(random_shit_line2[randomshit]);
+}
+
+
+//switche les differents mode d'affichage
+void switch_screen()
+{
+  int tmp_lcd_state =random(5);
+  while(tmp_lcd_state == lcd_state) tmp_lcd_state =random(5);
+  lcd_state = tmp_lcd_state ;
+  
+  switch(lcd_state)
+  {
+    case TODAY :
+      lcd_affiche_session();
+      break ;
+    case HIGHSCORE :
+      lcd_affiche_highscore();
+      break ;
+    case MOYENNE :
+      lcd_affiche_moyenne();
+      break ;
+    case RANDOMSHIT : 
+      lcd_affiche_randomshit();
+      break ;
+    case EBRIETE : 
+      lcd_affiche_ebriete();
+      break ;
+    default :
+      lcd_affiche_randomshit();
+      lcd_state = TODAY ;
+      break ;
+  }
+  
+  
+}
+
+
+////////////////////////////////////////////
+//                                        //
+//      Fonctions Logique de la merde     //
+//                                        //
+////////////////////////////////////////////
+
+//remet a 0 les stats
+void reinit()
+{
+  sauverInt(highscore_addr,0);
+  sauverInt(counter_addr,0);
+  sauverInt(reboots_addr,0);
+}
+
+//indente le score et change l'affichage en fonction
+void drink_beer()
+{
+  if(still_drinking == 1 ) {
+    lcd_affiche_still_drinking();
+    return;
+  }
+  //pour pas tricher, une bière toutes les 10 secondes, ça fait déjà un beau cul sec
+  still_drinking =1 ;
+  t.after(10 * 1000 ,[]{still_drinking = 0 ;});
+  
+  counter_total = lireInt(counter_addr);
+  counter_total ++ ;
+  sauverInt(counter_addr,counter_total);
+  
+  counter_today ++ ;   
+  
+  counter_highscore = lireInt(highscore_addr);
+  if(counter_today>counter_highscore)
+  {
+    counter_highscore ++;
+    sauverInt(highscore_addr,counter_highscore);
+    lcd_affiche_new_highscore();
+  }
+  else
+  {
+    lcd_affiche_session();
+  }
+}
+
+
+
+
+
+////////////////////////////////////////////
+//                                        //
+//   Fonctions affichage afficheur 7seg   //
+//                                        //
+////////////////////////////////////////////
+
 
 //pour switcher entre "info" et "16"
 void switch_digits()
@@ -219,43 +487,20 @@ void switch_digits()
       tempString[1] = 'n';
       tempString[2] = 'f';
       tempString[3] = 'o';
-  } 
+  }
 }
 
-void init_lcd()
+//fonction qui fait briller les chiffres, visiblement faut la garder tout le temps...
+void update_digits()
 {
-   //init lcd
-  lcd.begin(16,2); // sixteen characters across - 2 lines
-  lcd.backlight();
-
-  // write lcd
-  indent  =15 ;
-  if(counter_total > 9) indent =14 ;
-  if(counter_total > 99) indent =13 ;
-  if(counter_total > 999) indent =12 ;
-  lcd.setCursor(0,0);
-  lcd.print("Total bieres: ");
-  lcd.setCursor(indent,0);
-  lcd.print(counter_total);
-  lcd.setCursor(0,1);
-
-  indent  =15 ;
-  if(counter_today > 9) indent =14 ;
-  if(counter_today > 99) indent =13 ;
-  if(counter_today > 999) indent =12 ;
-  lcd.print("Aujourd'hui:");
-  lcd.setCursor(indent,1);
-  lcd.print(counter_today);
-
-  lcd.setCursor(0,0);
-  lcd.print(random_shit[2]);
-  
+    myDisplay.DisplayString(tempString, 0); //(numberToDisplay, decimal point location)
 }
+
+
 
 //Pour initialiser l'afficheur 7 segments 4 digits
 void init_digits()
 {
-
   int displayType = COMMON_CATHODE; //Your display is either common cathode or common anode
 
   
@@ -284,12 +529,13 @@ void init_digits()
 }
 
 
-void reinit()
-{
-  sauverInt(highscore_addr,0);
-  sauverInt(counter_addr,0);
-  sauverInt(reboots_addr,0);
-}
+
+////////////////////////////////////////////
+//                                        //
+//   Fonctions sauvegarde dans l'eeprom   //
+//                                        //
+////////////////////////////////////////////
+
 
 void sauverInt(int adresse, int val) 
 {   
