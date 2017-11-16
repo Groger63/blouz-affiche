@@ -117,7 +117,7 @@ String random_shit_line2[NB_RANDOMSHIT] =
                           "c'est la biere !", //8
                           "motocultable twa", //9
                           "   Appelle moi  ", //10
-                          "    8291r stp   "  //11
+                          "    8291R stp   "  //11
                           };
 
 //le conteneur de l'afficheur 7 segments
@@ -136,10 +136,6 @@ void setup()
   //reinit();
   pinMode(button, INPUT);
 
-  //incrémenter le nombre de reboots pour le calcul de la moyenne/jour
-  int reboots = lireInt(reboots_addr);
-  reboots ++ ;
-  sauverInt(reboots_addr,reboots);
 
   counter_today=0;
 
@@ -149,6 +145,11 @@ void setup()
   init_lcd();
   init_digits();
   test_shit();
+  
+  //incrémenter le nombre de reboots pour le calcul de la moyenne/jour
+  int reboots = lireInt(reboots_addr);
+  reboots ++ ;
+  sauverInt(reboots_addr,reboots);
   //lancer les events 
   t.every(10, update_digits);
   t.every(5 * 1000, switch_digits);
@@ -426,9 +427,9 @@ void switch_screen()
 //remet a 0 les stats
 void reinit()
 {
-  sauverInt(highscore_addr,0);
-  sauverInt(counter_addr,0);
-  sauverInt(reboots_addr,0);
+  sauverInt(highscore_addr,16); //16 car c'est le chiffre de la toute première sans interruption ou ça a fonctionné. Pis c'est ma promo <3
+  sauverInt(counter_addr,16);
+  sauverInt(reboots_addr,1);
 }
 
 //indente le score et change l'affichage en fonction
